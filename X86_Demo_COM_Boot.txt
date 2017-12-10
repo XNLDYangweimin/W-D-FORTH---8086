@@ -1,0 +1,117 @@
+// -----------------------------------------------
+// 
+// 	W&D FORTH X86 汇编语言 例子
+//	直接写到一个文本文件中就可以编译生成
+//	生成的“BOOT_DOS.COM”文件，可以在DOS下执行
+// 	COM 文件 BOOT 标准引导程序 框架
+//
+//	Written by Yang Weimin 	2015-09-24
+//
+// -----------------------------------------------
+
+// **** 加载X86开发平台模块 ****************************************************
+ VM_Load				金水明_X86开发系统.DAT
+
+// **** 程序开始 环境设置 ****************************************************
+	New_Program
+	RealFunctionOff
+	CaseSensitiveOff
+
+	Root_Only
+	Meta 		Definitions
+	TM_ASM 		Also
+
+// **** 系统引导程序 显示信息和内存分配 ****************************************************
+	Hex
+	AS_Empty 	
+	RESET LBL_CLR
+
+	0000		CodeSeg!			// 代码段位置
+	0F00		Code_MemeSeg	D:_!		// 代码段长度 0xf000 60KB
+
+// ---- 引导信息 -------------------
+Code_MemeSeg	D:_@ 10 * 0400 -   CodePC!			// 这个信息写在内存最高端, 将来可以被冲掉
+		
+	CS:_Here  CONSTANT "MSG_1				// 串地址1
+	0D Code_C,  
+	0A Code_C, 
+	CS:_Here
+
+	" COM load start 2015-09 ...$ " 
+	CodeSeg@ 	10 *
+	CS:_Here	+	
+	TM_,S				// 放到CS:段中 ( s#  Addr -- 先放一个字节长度 ns stringe )
+
+	CodePC! 20 Code_C,		// 对DOS字符串格式，去掉串长度
+
+// ---- 引导终止信息 ---------------------------------------------
+Code_MemeSeg	D:_@ 10 * 0200 -   CodePC!				// 这个信息写在内存最高端, 将来可以被冲掉
+
+	CS:_Here  CONSTANT "MSG_2
+	0D Code_C,  
+	0A Code_C, 
+	CS:_Here
+
+	"  <<这是引导演示程序>> 2015-09 杨为民 ...$ "  
+	CodeSeg@ 	10 *
+	CS:_Here	+
+	TM_,S				// 放到CS:段中
+
+	CodePC! 20 Code_C,		// 对DOS，冲掉串长度
+
+// ---- 初始引导 -------------------
+	Hex
+	AS_Empty 	
+	RESET LBL_CLR
+
+	2000  CONSTANT  Code_Start
+
+// ---- from 0100H by DOS -------------------
+	Hex
+	AS_Empty 	
+	RESET LBL_CLR
+
+// ****************************************************************
+// **** DOS COM可执行文件的起点 程序从这里开始 ********************
+0100       	CodePC!
+       Code_Start  		X86_JMP
+
+// ---- 代码段开始 --------------------
+Code_Start 	CodePC!
+
+// 初始化段寄存器 
+        	AX, 	CS 		X86_MOV      
+		ES, 	AX 		X86_MOV      
+		DS, 	AX 		X86_MOV     	
+		SS, 	AX 		X86_MOV 	
+		AX, 	
+		# Code_Start 2 - 	X86_MOV  
+		SP, 	AX 		X86_MOV
+
+        	DX, 	# "MSG_1   	X86_MOV   
+		AH, 	# 09  		X86_MOV  
+		21  			X86_INT			// 显示一次引导信息
+
+// ---- 一次引导 开始 -------------------
+// 	在这里写自己的引导程序，加载系统
+		
+// ---- 一次引导 结束 -------------------
+
+// ---- 二次引导 开始-------------------
+        	DX, 	# "MSG_2   	X86_MOV   
+		AH, 	# 09  		X86_MOV  
+		21  			X86_INT			// 显示二次引导信息
+
+// ---- 测试 无限循环 -------------------
+		CS:_Here	X86_JMP
+// ---- 二次引导 结束-------------------
+// 	在这里写自己的工作程序
+
+
+// **** COM 可引导汇编文件 保存 ******************************
+SAVE-COM 				BOOT_DOS.COM	
+WordsListTo 				BOOT_DOS.LST
+
+// **** 结束编译 ******************************
+ExitLoad
+
