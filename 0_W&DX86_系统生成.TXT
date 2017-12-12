@@ -1,0 +1,122 @@
+// -----------------------------------------------
+// 
+// 	生成 W&D FORTH DOS 版本 主程序
+//	使用 W&D FORTH 计算机语言
+//	Written by Yang Weimin 2014-12-11
+//	Modified by Yang Weimin 2017-12
+//
+// -----------------------------------------------
+
+// ==== 编译开始 ========================
+// ---- 1 开发环境 -----------------
+// ---- 2 8086 汇编语言 -----------------
+ VM_Load		金水明_X86开发系统.DAT
+ WordsListTo 		金水明_X86开发系统.LST
+
+	.CRLF  
+	" 编译开始 : " 	.S
+
+// ---- 3 WD 转FORTH -----------------
+ 	LoadInclude  	3_WD_To_FORTH.wdf
+
+// ---- 4 Meta -----------------
+	LoadInclude 	4_META.wdf
+ WordsListTo 		W&DX86_META.LST
+
+// ---- 5 Boot -----------------
+	LoadInclude 	5_BOOT.wdf
+
+// ==== 编译中间 测试 ========================
+	SAVE-COM 		Boot_Test.COM	//	保存COM文件
+	.CRLF 
+	" 中间测试 生成！！ " 	.S
+ExitLoad
+
+// ==== Kernel Code 原点 ========================
+	2100			CS:_PC!
+	.CRLF 
+	" 核心 Code Save : " 	.S
+	CS:_HERE	
+	DUP			.H	
+	T-CODE-PC   		SS:_!
+
+// ---- 6 虚拟机 核心字 -----------------
+	LoadInclude 		6_VMX.wdf
+
+	.CRLF 
+	" VMX PC Save : " 	.S
+	CS:_HERE	
+	DUP			.H	
+	T-CODE-PC   		SS:_!
+
+	T-CODE-PC   		SS:_@
+	CS:_PC!
+
+// ---- 7 虚拟机 主流程 -----------------
+	LoadInclude 		7_CODE.wdf		
+
+	.CRLF 
+	" CODE PC Save : " 	.S
+	CS:_HERE	
+	DUP			.H	
+	T-CODE-PC   		SS:_!
+
+	T-CODE-PC   		SS:_@
+	CS:_PC!
+
+// ---- 8 虚拟机 扩展词 -----------------
+	LoadInclude 		8_EXT.wdf
+
+	.CRLF 
+	" EXT PC Save : " 	.S
+	CS:_HERE	
+	DUP			.H	
+	T-CODE-PC   		SS:_!
+
+	T-CODE-PC   		SS:_@
+	CS:_PC!
+
+// ---- 9 虚拟机 文件接口 -----------------
+	LoadInclude 		9_FDOS.wdf		
+
+	.CRLF 
+	" FDOS PC Save : " 	.S
+	CS:_HERE	
+	DUP			.H	
+	T-CODE-PC   		SS:_!
+	
+	T-CODE-PC   		SS:_@
+	CS:_PC!
+
+// ---- A 虚拟机 文件加载 -----------------
+	LoadInclude 		10_SAVEX.wdf
+
+	.CRLF 
+	" SAVE PC Save : " 	.S
+	CS:_HERE	
+	DUP			.H	
+	T-CODE-PC   		SS:_!
+
+	T-CODE-PC   		SS:_@
+	CS:_PC!
+
+// ---- W&DX86 FORTH 系统 保存 -------------------
+	LoadInclude 		11_SAVE.wdf	
+
+	.CRLF 
+	" W&DX86 FORTH PC Save : " 	.S
+	CS:_HERE	
+	DUP			.H	
+	T-CODE-PC   		SS:_!
+	
+	T-CODE-PC   		SS:_@
+	CS:_PC!
+
+	.CRLF  
+	" 编译结束 : " 	.S
+
+// ==== FORTH 文件生成 ========================
+	SAVE-COM 		W&DX86_DOS.COM	//	保存COM文件
+	.CRLF 
+	" 祝贺你，系统已生成！！ " 	.S
+

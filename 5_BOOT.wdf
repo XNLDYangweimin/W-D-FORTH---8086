@@ -1,0 +1,198 @@
+// -----------------------------------------------
+// 
+// 	BOOT 引导程序            
+//
+//	Written by Yang Weimin 2017-12
+//
+// -----------------------------------------------
+	New_Program
+	RealFunctionOff
+	CaseSensitiveOff
+
+	Root_Only
+	Meta 	Definitions
+	TM_ASM 	Also
+
+
+// ==== 系统引导程序 ================================
+	Hex
+	AS_Empty 	
+	RESET LBL_CLR
+
+	T-BASE-SEG	CodeSeg!
+	T-MEM-SEG	Code_MemeSeg	D:_!
+	100		CodePC!
+
+// ---- 引导信息 -------------------
+	Hex
+	AS_Empty 	
+
+Code_MemeSeg	D:_@ 10 * 0400 -   CodePC!				// 这个信息将来可以被冲掉
+		
+	CS:_Here  CONSTANT "MSG_1				// 串地址1
+	0D Code_C,  
+	0A Code_C, 
+	CS:_Here
+	
+	" System load start 2017-12 ...$" 
+	CodeSeg@ 	10 *
+	CS:_Here	+
+	TM_,S				// 放到CS:段中
+
+	CodePC! 20 Code_C,		// 对DOS，冲掉串长度
+
+// ---- 引导终止信息 ---------------------------------------------
+Code_MemeSeg	D:_@ 10 * 0200 -   CodePC!				// 这个信息将来可以被冲掉
+
+	CS:_Here  CONSTANT "MSG_2
+	0D Code_C,  
+	0A Code_C, 
+	CS:_Here		
+
+	" System Init start 杨为民 2017-12 ...$"  
+	CodeSeg@ 	10 *
+	CS:_Here	+	
+	TM_,S				// 放到CS:段中
+
+	CodePC! 20 Code_C,		// 对DOS，冲掉串长度
+
+// ==== 初始引导 ================================
+	Hex
+	AS_Empty 	
+	RESET LBL_CLR
+
+// ---- from 0100H by DOS -------------------
+// only allow using 4 bytes 
+	Hex
+	AS_Empty 	
+	RESET LBL_CLR
+
+0100		CS:_PC!
+        	
+		BX, # T-Code_Org 	X86_MOV
+        	CS: [BX]  		X86_JMP
+
+// ==== 代码段开始 ================================
+T-Code_Org 	CS:_@ 	
+		CS:_PC!
+
+// 初始化段寄存器  模拟 DOS 调用
+        	AX, CS 	X86_MOV      
+		ES, AX 	X86_MOV      
+		DS, AX 	X86_MOV
+	     	SS, AX 	X86_MOV 	
+
+		AX, # 0FFE 	X86_MOV  
+		SP, AX 	X86_MOV
+
+        	DX, # "MSG_1 	X86_MOV   
+		AH, # 09  	X86_MOV  
+		21  		X86_INT			// 显示一次引导信息
+
+// ==== 一次引导 开始 ================================
+// 	加载内存映像
+		
+// ---- 一次引导 结束 -------------------
+
+// ==== 二次引导 开始 ================================
+        	DX, # "MSG_2 	X86_MOV   
+		AH, # 09  	X86_MOV  
+		21  		X86_INT			// 显示二次引导信息
+
+// ==== 引导结束 ================================
+        	BX, # T-<Start_0> 	X86_MOV    
+		[BX]  			X86_JMP
+
+// ==== FORTH 冷启动 ================================
+// ---- Forth 初始化 虚拟机初始化 --------------------
+HEX
+CS:_HERE 	T-<Start_0> CS:_!  			//	( cold boot )
+
+		X86_CLI					//  关中断
+		AX, CS 		X86_MOV 
+		BX, # T-SS_Seg  	X86_MOV  
+		AX, [BX] 		X86_ADD   
+		SS, AX 		X86_MOV
+
+		AX, CS 		X86_MOV 
+		BX, # T-VS_Seg  	X86_MOV  
+		AX, [BX] 		X86_ADD   
+		ES, AX 		X86_MOV
+
+		AX, CS 		X86_MOV 
+		BX, # T-DS_Seg  	X86_MOV  
+		AX, [BX] 		X86_ADD   
+		DS, AX 		X86_MOV
+
+		SI, # T-Code_PC_0   	X86_MOV       
+		CS: AX, 	[SI] 	X86_MOV
+		DI, # T-CODE-PC     	X86_MOV       
+		SS: [DI], AX 		X86_MOV
+
+		SI, # T-Com_Var_PT_0	X86_MOV       
+		CS: AX, [SI] 		X86_MOV
+		DI, # T-COM-VAR-PT  	X86_MOV       
+		SS: [DI], AX 		X86_MOV
+
+		SI, # T-SS_Top_0   	X86_MOV       
+		CS: AX, [SI] 		X86_MOV
+              SP, AX   		X86_MOV    	//	( SP )
+
+		SI, # T-User_Var_PT_0 	X86_MOV       
+		CS: AX, [SI] 			X86_MOV
+		DI, # T-USER-VAR-PT     	X86_MOV       
+		DS: [DI], AX 			X86_MOV
+
+		SI, # T-VM_Word_PT_0    	X86_MOV       
+		CS: AX, [SI] 			X86_MOV
+		DI, # T-VM-WORD-PT      	X86_MOV       
+		ES: [DI], AX 			X86_MOV
+
+		SI, # T-VM_Voc_PT_0   	X86_MOV       
+		CS: AX, [SI] 			X86_MOV
+		DI, # T-VM-VOC-PT       	X86_MOV       
+		ES: [DI], AX 			X86_MOV
+
+		SI, # T-Voc_ROOT_PT_0   	X86_MOV       
+		CS: AX, [SI] 			X86_MOV
+		DI, # T-ROOT-VOC        	X86_MOV        
+		ES: [DI], AX 			X86_MOV
+
+		SI, # T-Voc_ASM_PT_0   	X86_MOV       
+		CS: AX, [SI] 			X86_MOV
+		DI, # T-ASM-VOC        	X86_MOV        
+		ES: [DI], AX 			X86_MOV
+
+		SI, # T-Voc_Task_PT_0   	X86_MOV       
+		CS: AX, [SI] 			X86_MOV
+		DI, # T-Task-VOC        	X86_MOV        
+		ES: [DI], AX 			X86_MOV
+
+		SI, # T-VM_RS_Top_0   	X86_MOV       
+		CS: RP, [SI] 			X86_MOV  				//	 ( RP )
+		SI, # T-VM_AS_Top_0   	X86_MOV       
+		CS: AP, [SI] 			X86_MOV   				//	( AP )
+
+		X86_STI			// 开中断
+
+// ==== FORTH 热启动 ================================
+// Warm Boot  from   word                           
+        	BX, # T-<Login> 	X86_MOV  
+		IP, [BX] 		X86_MOV
+        	WP, IP  		X86_MOV   
+		IP 			X86_INC  
+		IP 			X86_INC
+
+// ==== 引导测试 ================================
+		CS:_Here  		X86_JMP			
+
+// ==== 虚拟机启动 ================================
+        	ES: [E:WP] 		X86_JMP
+
+// ---- 引导代码结束地址 -------------------
+.CRLF " Boot PC= " .S
+CS:_HERE	.H
+
+// ---- 退出程序 -------------------
+ExitLoad
+

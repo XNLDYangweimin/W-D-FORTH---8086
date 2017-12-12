@@ -1,0 +1,500 @@
+// -----------------------------------------------
+// 
+// 	目标机 FORTH 编译器     
+//
+//	Written by Yang Weimin 2017-12
+//
+// -----------------------------------------------
+
+// ---- WD词汇 ----------------------------
+	Hex
+	Root_Only 
+	Meta 	Definitions
+	TM_ASM 	Also
+
+// ==== 系统转换接口 ==================================
+// ---- 内存编译模式 --------------------------------- 
+// ---- 16 位地址模式 ------------------------
+//  （ 段地址16位 偏移地址16位 )	
+		: META_P_@		P_@ ;
+		: META_P_!		P_! ;
+		: META_P_C@		P_C@ ;
+		: META_P_C!		P_C! ;
+
+// ==== 新系统生成区域 映像 ==================================
+	HEX
+		6000 CONSTANT	T-BASE-SEG
+ 
+// ---- 代码段 ------------------------
+		0000				CONSTANT	T-CS:
+		6000				CONSTANT	T-CS-LEN	// 24-8=16KB
+
+// ---- 数据段 ------------------------
+		0000				CONSTANT	T-DS:
+		2000				CONSTANT	T-DS-LEN	// 8KB
+
+// ---- 虚拟机段 ------------------------
+		0600				CONSTANT	T-VS:
+		8000				CONSTANT	T-VS-LEN	// 32KB
+
+// ---- 堆栈段 ------------------------
+		0E00				CONSTANT	T-SS:
+		1000				CONSTANT	T-SS-LEN	// 4KB
+
+		0F00				CONSTANT	T-MEM-SEG	// 60KB 内存顶
+
+		T-BASE-SEG T-CS: +	 CONSTANT  T-CS
+		T-BASE-SEG T-SS: + 	CONSTANT  T-SS
+		T-BASE-SEG T-DS: + 	CONSTANT  T-DS
+		T-BASE-SEG T-VS: + 	CONSTANT  T-VS
+
+// ---- 堆栈段 ---------------------------------
+	 	: SS:_C@  	T-SS SWAP META_P_C@    	;  	//  ( taddr -- char )
+		: SS:_@       T-SS SWAP META_P_@  		;	//  ( taddr -- n ) 
+		: SS:_C!     	T-SS SWAP META_P_C! 		;  	// ( char taddr -- )
+		: SS:_!       T-SS SWAP META_P_!  		;	//  ( n taddr -- )
+
+// ---- SS: 多任务公共数据区 --------------------------------- 
+		0000 	CONSTANT 	T-COM-VAR-PT			// SS:  公共变量指针	( in SS: )
+		0002 	CONSTANT	T-CODE-PC   			// SS:  机器码指针 	( in CS: )
+
+		: Com_Var-T  T-COM-VAR-PT  SS:_@ DUP CONSTANT	// 在公共数据区定义公共变量
+        		2 + T-COM-VAR-PT  SS:_! 	;
+		0004  T-COM-VAR-PT  SS:_!				// 初始化变量
+ 
+// ---- 设置 W&D 汇编语言 ---------------------------------
+		T-BASE-SEG	CodeSeg!
+		T-MEM-SEG	Code_MemeSeg	D:_!
+		100		CodePC!
+
+// ---- 使用 W&D 汇编语言 ---------------------------------
+		: CS:_C@ 	CODE_C@  	; 	//  ( taddr -- char )
+		: CS:_@    	CODE_@ 	; 	//  ( taddr -- n )
+		: CS:_C!   	CODE_C!  	;	//   ( char taddr -- )
+		: CS:_!    	CODE_!		;	//  ( n taddr -- )   
+
+		: CS:_PC! 	CodePC! 	;	//  ( PC --    )
+
+		: CS:_C,     	CODE_C,   	;	//  ( char -- )
+		: CS:_,       CODE_,   	;    	//     ( n -- ) 
+ 
+// ---- 系统数据区 --------------------------------- 
+		0110 	CONSTANT 	T-SYS-DATA-PT			// CS:  系统变量指针	( in CS: )
+
+		: Sys_Data-T 	T-SYS-DATA-PT CS:_@ DUP CONSTANT
+        			2 + T-SYS-DATA-PT CS:_! 	;
+		0112  T-SYS-DATA-PT CS:_!
+ 
+// ---- 物理计算机 系统变量定义 ------------------------ 
+		Sys_Data-T T-Code_Org      2000 T-Code_Org CS:_!		// 112
+ 
+		Sys_Data-T T-CS_Seg   	T-CS: 		T-CS_Seg   CS:_!  
+		Sys_Data-T T-CS_Off        	0000 		T-CS_Off   CS:_!
+		Sys_Data-T T-CS_Len        	T-CS-LEN  	T-CS_Len   CS:_! 
+
+		Sys_Data-T T-SS_Seg        T-SS: 		T-SS_Seg   CS:_! 	// 11A 
+		Sys_Data-T T-SS_Off        0000 		T-SS_Off   CS:_!
+		Sys_Data-T T-SS_Len        T-SS-LEN  	T-SS_Len   CS:_! 
+ 
+		Sys_Data-T T-DS_Seg        T-DS: 		T-DS_Seg   CS:_!  	// 120
+		Sys_Data-T T-DS_Off        0000 		T-DS_Off   CS:_!
+		Sys_Data-T T-DS_Len        T-DS-LEN  	T-DS_Len   CS:_!
+ 
+		Sys_Data-T T-VS_Seg        T-VS: 		T-VS_Seg   CS:_!   // 126
+		Sys_Data-T T-VS_Off        0000 		T-VS_Off   CS:_!
+		Sys_Data-T T-VS_Len        T-VS-LEN  	T-VS_Len   CS:_!
+
+		Sys_Data-T T-MEM_Seg        T-MEM-SEG 	T-MEM_Seg   CS:_!   // 12C
+ 
+		Sys_Data-T T-<Start_0>     2000 T-<Start_0>  CS:_!		// 临时
+
+// ==== 虚拟计算机 系统变量定义 ==================================
+		0140  		T-SYS-DATA-PT 		CS:_!
+ 
+		Sys_Data-T 	T-Com_Var_Top          	
+		Sys_Data-T 	T-Code_PC_0            	
+		Sys_Data-T 	T-Com_Var_PT_0         	
+		Sys_Data-T 	T-SS_Top_0             	
+		Sys_Data-T 	T-User_Var_PT_0        	
+		Sys_Data-T	T-VM_RS_Top_0         	
+		Sys_Data-T 	T-VM_AS_Top_0         	
+		Sys_Data-T 	T-VM_Word_PT_0         	
+		Sys_Data-T 	T-VM_Voc_PT_0          	
+		Sys_Data-T 	T-Voc_ROOT_PT_0         	
+		Sys_Data-T 	T-Voc_ASM_PT_0          	
+		Sys_Data-T	T-Voc_Task_PT_0        	
+
+// ---- 数据段 ---------------------------------
+		: DS:_C@  	T-DS SWAP 	META_P_C@  	; 	//  ( taddr -- char )
+		: DS:_@       T-DS SWAP  	META_P_@  	;	//  ( taddr -- n ) 
+		: DS:_C!    	T-DS SWAP 	META_P_C!  	;	//  ( char taddr -- )
+		: DS:_!       T-DS SWAP  	META_P_!  	;	//  ( n taddr -- )
+ 
+// ---- 用户数据区 ---------------------------------
+		02FA 	CONSTANT 	T-AS0  
+		03FA 	CONSTANT 	T-RS0  
+
+		0400 	CONSTANT 	T-USER-VAR-PT			// DS:  用户变量指针	( in DS: )
+		: User_Var-T  	T-USER-VAR-PT  DS:_@ DUP CONSTANT
+        			2 + T-USER-VAR-PT  DS:_! 	;
+		0402  T-USER-VAR-PT  DS:_!
+ 
+// ---- 数据区存取 ---------------------------------
+		: DS:_DP!    	T-DS T-USER-VAR-PT META_P_! 	;  	// ( DP --    )
+		: DS:_HERE      T-DS T-USER-VAR-PT META_P_@ 	; 	//  ( -- taddr )
+		: DS:_ALLOT     DS:_HERE + DS:_DP!   		; 	// ( n -- ) 
+ 
+		: DS:_C,      	DS:_HERE DS:_C!   1 DS:_ALLOT  	; 	//  ( char -- )
+		: DS:_,         DS:_HERE DS:_!    2 DS:_ALLOT  	; 	//  ( n -- )
+
+// ==== FORTH 系统变量 ==================================
+		User_Var-T 	T-<Cold>
+		User_Var-T 	T-<Login>
+		User_Var-T 	T-<Warm>
+		User_Var-T 	T-<Halt>
+		User_Var-T 	T-<Error#>
+		User_Var-T 	T-[Err#]
+		User_Var-T 	T-[ErrWP]
+
+// ---- 块数据区 ---------------------------------
+		T-DS-LEN 2 - 		CONSTANT   	T-USER-DATA     	// DS:  块数据区域指针	( in DS: )
+		T-USER-DATA 2 -  	T-USER-DATA    	DS:_!
+
+		: T-USER-DATA-ALLOT 
+			T-USER-DATA DS:_@ SWAP - T-USER-DATA DS:_! 	;
+ 
+// ---- 虚拟计算机 指令段 ---------------------------------
+		: VS:_C@    	T-VS SWAP 	META_P_C@  	;	//  ( taddr -- char )
+		: VS:_@     	T-VS SWAP  	META_P_@	;	// ( taddr -- n )
+		: VS:_C!    	T-VS SWAP  	META_P_C!	;	//  ( char taddr -- )
+		: VS:_!     	T-VS SWAP  	META_P_!	;	//  ( n taddr -- ) 
+ 
+// ---- 虚拟计算机 指令数据区 --------------------------------- 
+		0000 	CONSTANT   	T-VM-WORD-PT    	// VS:  字指针		( in VS: )
+		0002 	CONSTANT   	T-VM-VOC-PT		// VS:  字典指针	( in VS: )
+		0004 	T-VM-WORD-PT 	VS:_!
+
+		: VS:_WP!    		T-VS T-VM-WORD-PT 	META_P_! 	; 	//  ( VP --    )
+		: VS:_HERE     	T-VS T-VM-WORD-PT	META_P_@	;	//  ( -- taddr )
+		: VS:_ALLOT   	VS:_HERE + VS:_WP!   			;	// ( n -- )  
+ 
+		: VS:_C,      	VS:_HERE VS:_C!   	1 VS:_ALLOT	;	//  ( char -- )
+		: VS:_,      		VS:_HERE VS:_!    	2 VS:_ALLOT  	;	//  ( n -- )
+
+   		: VS:_P_S,   		DUP if  1 1 for				 //  ( SEG addr len -- )
+         				P_COUNT VS:_C,   endfor  LDROP
+					else DROP LDROP endif   ; 
+    
+// ==== 词汇表定义 ===============================
+// ---- VS 结构 ----------
+// 低端地址 向上增长
+// 0000  T-VM-WORD-PT	字指针		= 0048   指向低端的虚拟机可用区域 
+// 0002  T-VM-VOC-PT		Dir目录指针	指向高端的最后一个目录
+// 0004  T-ROOT-VOC		Root 词汇
+
+// +0    Dir_Link		= T-VOC-LAST
+// +2    Voc_Link		= T-ASM-VOC
+// +4    NLF			名字长度
+// +5    Name			名字
+
+// 0014  T-ASM-VOC		Root 词汇
+// +0    Dir_Link		= T-VOC-LAST
+// +2    Voc_Link		= T-Task-VOC
+// +4    NLF			名字长度
+// +5    Name			名字
+
+// 0024  T-Task-VOC		Root 词汇
+// +0    Dir_Link		= T-VOC-LAST
+// +2    Voc_Link		= 0000 	终止
+// +4    NLF			名字长度
+// +5    Name			名字
+
+// 0034  T-CURRENT		= T-ROOT-VOC
+// 0036  T-CONTEXT-MAX	= 8
+// 0038  T-CONTEXT	0	= 0000
+// 003A  T-CONTEXT	1	= 0000
+
+// 0046  T-CONTEXT	7	= 0000
+
+// 0048  第一个字地址
+
+
+// 高端地址 向下增长
+// -0	T-VOC-LAST	= 0000 	每个目录的底 链式 搜索到底的标志 ==0
+// -2	
+	
+		T-VS-LEN 10 -  	CONSTANT   T-VOC-LAST      
+		0000 T-VOC-LAST       VS:_!
+
+     		T-VOC-LAST 2 - 	T-VM-VOC-PT  	   VS:_!		//	最后一个字
+ 
+		0004 CONSTANT   	T-ROOT-VOC      
+		T-VOC-LAST 		T-ROOT-VOC       VS:_!
+
+		0014 CONSTANT   	T-ASM-VOC       
+		T-VOC-LAST 		T-ASM-VOC        VS:_!
+
+		0024 CONSTANT   	T-Task-VOC      
+		T-VOC-LAST 		T-Task-VOC       VS:_!
+ 
+		T-ASM-VOC       T-ROOT-VOC 2 +  VS:_!
+		T-Task-VOC      T-ASM-VOC  2 +  VS:_!
+		0000            T-Task-VOC 2 +  VS:_!
+
+		0034 CONSTANT   T-CURRENT       0004 T-CURRENT        VS:_!
+
+		0036 CONSTANT   T-CONTEXT-MAX   0008 T-CONTEXT-MAX    VS:_!
+		0038 CONSTANT   T-CONTEXT
+		0000 T-CONTEXT 00 + VS:_!      0000 T-CONTEXT 02 +   VS:_!
+		0000 T-CONTEXT 04 + VS:_!      0000 T-CONTEXT 06 +   VS:_!
+		0000 T-CONTEXT 08 + VS:_!      0000 T-CONTEXT 0A +   VS:_!
+		0000 T-CONTEXT 0C + VS:_!      0000 T-CONTEXT 0E +   VS:_!
+ 
+		0048 T-VM-WORD-PT VS:_!
+ 
+// ==== 系统变量初始化 ===============================
+		0800 		T-Com_Var_Top    	CS:_! 
+		2000 		T-Code_PC_0      	CS:_!
+		0004 		T-Com_Var_PT_0   	CS:_!
+		T-SS-LEN 2 -	T-SS_Top_0    	CS:_!
+
+		0002 		T-User_Var_PT_0  	CS:_!
+		T-RS0 		T-VM_RS_Top_0    	CS:_!
+		T-AS0 		T-VM_AS_Top_0    	CS:_!
+
+		0002 		T-VM_Word_PT_0   	CS:_!
+		T-VS-LEN 10 - T-VM_Voc_PT_0    	CS:_!
+		T-VS-LEN 10 - T-Voc_ROOT_PT_0    	CS:_!
+		T-VS-LEN 10 - T-Voc_ASM_PT_0    	CS:_!
+		T-VS-LEN 10 - T-Voc_Task_PT_0    	CS:_!
+
+// ---- 产生基本字典名 --------------------------
+		" Root" T-VS 	T-Root-VOC 4 + 	P_,S		// ( s# Seg Addr -- 先放一个字节长度 ns stringe )
+		" ASM" T-VS 	T-ASM-VOC 4 + 	P_,S			// ( s# Seg Addr -- 先放一个字节长度 ns stringe )
+		" Task" T-VS 	T-Task-VOC 4 + 	P_,S		// ( s# Seg Addr -- 先放一个字节长度 ns stringe )
+ 
+// ==== 虚拟机 词汇 ===============================
+	Root_Only 
+	TM_ASM 	Definitions
+	Meta 	Also
+
+// ---- 虚拟机寄存器定义 ------------------------------------------- 
+		CW_: RP 		BP 		;_CW 			// 返回栈指针
+		CW_: [D:RP+] 		[BP] 		;_CW 
+		CW_: RP, 		BP, 		;_CW 
+		CW_: [D:RP+], 	[BP], 		;_CW
+
+		CW_: AP 		DI 		;_CW 			// 算术栈指针
+		CW_: [AP]  		[DI] 		;_CW 
+		CW_: AP, 		DI, 		;_CW 
+		CW_: [AP],  		[DI], 		;_CW
+
+		CW_: IP 		SI 		;_CW			// 指令指针 
+		CW_: [E:IP] 		[SI] 		;_CW 
+		CW_: IP, 		SI, 		;_CW 
+		CW_: [E:IP], 		[SI], 		;_CW
+
+		CW_: WP 		BX 		;_CW 			// 字指针
+		CW_: [E:WP] 		[BX] 		;_CW 
+		CW_: WP, 		BX, 		;_CW 
+		CW_: [E:WP], 		[BX], 		;_CW
+HEX
+		CW_: [RP],SI-MOV   
+			89 	CODE_C, 
+			76 	CODE_C, 
+			00 	CODE_C, 
+			;_CW
+
+//	可以自由使用 AX、CX、DX
+//	可以使用系统堆栈 SP 暂时保存数据，但注意在每个字中保持平衡
+
+// ==== 目标机 编译结果显示 =============================
+// ---- 词汇恢复 ----------------------------------------------------
+	Root_Only 
+	Meta 	Definitions
+	TM_ASM 	Also
+
+// ---- 数字显示 ----------------------------------------------------
+	Hex
+	AS_Empty
+		CW_: Spaces
+			1 1 For
+				20	Emit
+				EndFor
+			;_CW
+
+		CW_: H.
+			DUP 9 > if
+				0A - 41 + 
+				Else
+				30 +
+				EndIf
+			Emit
+			;_CW			
+
+		CW_: .BYTE							//	显示一个字节数据
+			00FF & 20 Emit 
+			DUP  F0 & 10 / H. 
+			0F & H. 
+			;_CW
+
+		CW_: .INT  						//	显示一个16位整数数据
+			DUP F000 &	1000 / 	H.
+			FFF	&
+			DUP F00 &	100 / 		H.
+			FF	&
+			DUP F0 &	10 / 		H.
+			0F	&		H.
+			;_CW
+
+		CW_: .CHAR							//	显示一个字符
+			00FF & DUP 20 < if 
+				DROP 2E 
+				endif 
+			Emit 
+			;_CW
+
+		CW_: .16BYTES						//	( segment offset --- )	显示一整行
+			.CRLF 
+			DDUP 	SWAP 	.INT 
+			3A 	Emit 	.INT 
+			1 	Spaces 	
+			DDUP 0F 0 1 for  
+				P_COUNT 	.BYTE 
+				endfor  
+			DDROP
+			4 	Spaces 
+			0F 0 1 For  
+				P_COUNT .CHAR 
+				EndFor  
+			DDROP
+			;_CW
+
+		CW_: P_DUMP    								//	( segment offset length --- )
+			DEPTH 3 < if								//	检查参数的数量是否足够
+				.CRLF " P_DUMP 参数个数不够！！ " .S 						
+				ABORT
+				EndIf
+
+			US_Push 
+			DUP 	FFF0 	& 
+			10 	+ 
+			SWAP 	DUP 000F &				//	( 段 整数偏移 原始偏移 起始空格数  -- )
+			US_Pop 
+			OVER 	10 
+			SWAP 	- 	- 
+			US_Push 
+			3 PICK 	-ROT						//	( 段 整数偏移 段 原始偏移 起始空格数  -- )
+
+			.CRLF 									//	显示栏名
+			" seg. off. " .S  
+
+			0F 0 1 For 								
+				For_I 	.BYTE 
+				EndFor		
+			4 Spaces 
+			0F 0 1 for 
+				For_I 	H.    
+				EndFor
+
+			.CRLF 									//      显示开始地址
+			2 PICK 	.INT 
+			3A 		Emit 
+			1 PICK 	
+			FFF0 	& 	.INT 
+			1 Spaces 		
+			2 PICK 2 PICK 2 PICK 
+			DUP 3 * 	Spaces 				//      开始空数据
+			10 SWAP - 1 1 for 					//      头一行数据
+				P_COUNT 
+				.BYTE 
+				endfor 
+			DDROP			
+			4 	Spaces 
+			DUP 	Spaces 
+			10 SWAP - 1 1 for 					//      头一行字符
+				P_COUNT 
+				.CHAR 
+				endfor 
+			DDROP			
+			US_Pop 
+			DUP 0F & SWAP 10 / 
+			SWAP US_Push						//	( seg offset lines -- )
+			DUP 0 >   if	
+				1 1 for 					//	显示中间行
+					DDUP 
+					.16BYTES 
+					10 + 
+					endfor 		
+				else 	
+				DROP 
+				endif
+			US_Pop DUP 0 > if	
+				.CRLF 						//	有最后一行
+				2 PICK 
+				.INT 3A Emit 
+				1 PICK 
+				.INT 
+				1 	Spaces
+				2 PICK 2 PICK 2 PICK 				//	复制参数
+				1 1 for 
+					P_COUNT 
+					.BYTE 
+					endfor 
+				DDROP		//      最后一行数据数据
+				10 	OVER 	- 
+				3 * Spaces 4 Spaces                 
+				1 1 for 
+					P_COUNT 
+					.CHAR 
+					endfor 
+				DDROP		//      最后一行数据
+				
+				else 	
+				DROP DDROP 					//	无最后一行
+				endif
+			.CRLF 
+			;_CW
+
+// ==== 编译过程中测试 显示目标机数据结构 ===============================
+	Hex
+	AS_Empty
+	T-VS 	T-Root-VOC	100 P_DUMP
+
+// ==== 编译过程中测试 显示目标机 ===============================
+	Hex
+	AS_Empty
+
+// ---- 已生成目标机的词汇 ----------------------------------------------------
+		: WORDS-T 
+        		.CRLF 
+			T-ROOT-VOC 
+        		VS:_@ repeat 			//	( LFA -- )
+        		DUP VS:_@ 0 !=
+        			if  
+  				.CRLF      DUP 	        .H
+  				3E Emit DUP 2 + VS:_@       .H
+  				2D Emit DUP 2 + VS:_@ VS:_@ .H
+           			20 Emit DUP 5 + VS:_C@ 1- 0 1 
+					for DUP 6 + I + VS:_C@ Emit endfor
+        			endif VS:_@ DUP 0 ==
+        		until DROP .CRLF  ;
+
+// ---- 已生成目标机的内存 ----------------------------------------------------
+		: MAP-T 
+        		.CRLF  " Code_PC      = " 	.S 	T-CODE-PC     	SS:_@ .H
+        		.CRLF  " Com_Var_PT   = "  	.S 	T-COM-VAR-PT  	SS:_@ .H
+        		.CRLF  " User_Var_PT  = " 	.S 	T-USER-VAR-PT 	DS:_@ .H
+        		.CRLF  " Sys_Var_PT   = " 	.S  	T-SYS-DATA-PT  	CS:_@ .H
+        		.CRLF  " User_Data_PT = " 	.S 	T-USER-DATA  		DS:_@ .H
+        		.CRLF  " VM_Word_PT   = "  	.S 	T-VM-WORD-PT  	VS:_@ .H
+        		.CRLF  " VM_Voc_PT    = "  .S 	T-VM-VOC-PT   	VS:_@ .H
+        		;
+
+// ---- 显示已生成情况 ----------------------------------------------------
+WORDS-T
+MAP-T
+
+// ---- 退出程序 ----------------------------------------------------
+ExitLoad
+

@@ -1,0 +1,213 @@
+// -----------------------------------------------
+// 
+// 	模拟目标机 
+//
+//	Written by Yang Weimin 2017-12
+//
+// -----------------------------------------------
+ 
+//  ---- 南湖 虚拟计算机 系统  -------------------
+	New_Program
+	RealFunctionOff
+
+	CaseSensitiveOff
+
+// ---- WD词汇 ----------------------------
+	Root_Only 
+	Meta 	Definitions
+	TM_ASM 	Also	
+
+// ---- FORTH 词汇 ----------------------------
+	Hex
+	AS_Empty
+
+// ---- 字典 词汇 ----------------------------
+	CW_: ASM
+		TM_ASM 	Also
+		;_CW
+
+// ---- 冒号定义 词汇 ----------------------------
+	Find CW_: 
+		CW_: :  
+			[ V:_, ] 
+			;_CW
+	
+	Find ;_CW
+		CW_: ;
+			[ V:_, ] 
+			;_CW
+		Immediate
+
+// ---- 16 位地址模式 ------------------------
+//  （ 段地址16位 偏移地址16位 )	
+	Hex
+	AS_Empty
+		CW_: P_@			//	(  Seg Addr -- Data )
+			SWAP 	10 * +
+			TM_@ 
+			;_CW
+		CW_: P_!			//	( Data Seg Addr -- )		
+			ROT FFFF 	&	-ROT
+			SWAP 	10 * +
+			TM_! 
+			;_CW
+		CW_: P_C@			//	(  Seg Addr -- Byte )
+			SWAP 	10 * +
+			TM_C@ 
+			;_CW
+		CW_: P_C!			//	( Byte Seg Addr -- )	
+			ROT FF 	&	-ROT
+			SWAP 	10 * +
+			TM_C! 
+			;_CW
+
+// ---- 宿主机存取 ------------------------
+		CW_:	D_!
+			D:_!
+			;_CW
+
+		CW_:	D_@
+			D:_@
+			;_CW
+
+		CW_:	DALLOT
+			D:_Allot
+			;_CW
+
+		CW_:	DHERE
+			D:_Here
+			;_CW
+
+		CW_:	DS_Seg 
+			0
+			;_CW
+
+		CW_:	P_ERASE			// ( Seg Off Len --- ) 
+			D:_Erase
+			DROP
+			;_CW
+
+		CW_:	V_C@
+			V:_@
+			;_CW
+
+		CW_:	V_C,
+			V:_,
+			;_CW
+
+// ---- X86 堆栈指针 ------------------------
+		CW_:	DEPTH
+			AS_Deep
+			;_CW
+
+		CW_:	LSWAP
+			DSWAP
+			;_CW
+
+		CW_:	LDROP
+			DDROP
+			;_CW
+
+		CW_:	LDUP
+			DDUP
+			;_CW
+
+
+// ---- 基本字 ------------------------
+		CW_:	2/
+			2 	/
+			;_CW
+
+		CW_:	2*
+			2 	*
+			;_CW
+
+		CW_:	CRLF
+			.CRLF
+			;_CW
+
+		CW_:	.IP			
+			;_CW
+
+		CW_:	U.
+			.H
+			;_CW
+
+		CW_:	I
+			For_I
+			;_CW
+
+		CW_:	J
+			For_J
+			;_CW
+
+		CW_:	K
+			For_K
+			;_CW
+
+// ---- 基本字 ------------------------
+	Hex
+	AS_Empty
+
+		CW_: >S
+			US_Push
+			;_CW
+		CW_: S>
+			US_Pop
+			;_CW
+
+// ---- 60KB 目标机 仿真环境 ------------------------
+		0000				CONSTANT	CS_Seg
+		0000				CONSTANT	DS_Seg
+		1000				CONSTANT	PAD
+		0600				CONSTANT	VS_Seg
+		0E00				CONSTANT	SS_Seg
+
+// ---- 临时变量 ------------------------
+		Variable 	<"#Word>
+
+// ---- 取 FORTH 字 ------------------------
+		CW_: BL_WORD				// (  -- "Addr )
+			Get_String			// ( "# -- )
+			DUP		
+			<"#Word>	D:_!		// 保存
+			DS_Seg		10 *
+			PAD		+
+			TM_,S
+			PAD				// (  -- "Addr )
+			;_CW
+
+// ---- 物理地址空间操作 ------------------------
+		CW_: P_COUNT				// ( Seg Addr -- Seg Addr+1 Char )
+			LDUP
+			SWAP		10 * +
+			TM_Count			// 	( Saddr -- Saddr+1 CLen )
+			SWAP 	DROP
+			SWAP	1+ 	SWAP
+			;_CW
+
+		CW_: P_CMOVE				// ( SSeg SAddr DSeg DAddr CLength --  )
+			US_Push	US_Push	
+			US_Push
+			SWAP 	10 * +
+			US_Pop		US_Pop
+			SWAP 	10 * +
+			US_Pop
+			TM_Move			//	( Soff  Doff. len. --  )
+			;_CW
+
+		CW_: P_ERASE				// ( Seg Addr BLength --  )
+			US_Push
+			SWAP 	10 * +
+			US_Pop
+			TM_Erase			//	( off. len. --  )
+			;_CW
+
+		CW_: P_,S				// ( s# Seg Addr -- 先放一个字节长度 ns stringe )
+			SWAP 	10 * +
+			TM_,S				//	( s#  Addr -- 先放一个字节长度 ns stringe )
+			;_CW
+
+// ---- 退出程序 ----------------------------
+ExitLoad
+
