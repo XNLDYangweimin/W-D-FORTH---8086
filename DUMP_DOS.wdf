@@ -1,0 +1,80 @@
+// ------------------------------------
+//
+// 		DOS 内存查看
+//
+//		自上而下的思维，自下而上的编程
+//
+// 		Written  by Yang Weimin 2010-01-29
+// 		Modified by Yang Weimin 2017-12-12
+//
+// -------------------------------------
+
+// ---- 初始化 -------------------
+	HEX	ROOT_ONLY			//	使用根字典
+
+// ---- 空格显示 -------------------
+		: SPACES			// ( n -- )	显示n个空格
+			0 1 for 20 EMIT endfor 
+		;
+
+// ---- 内存显示 -------------------
+		: .BYTE			// ( n -- )	显示一个字节数据
+			00FF AND 		//  数据都是16位宽，只用低8位
+                    20 EMIT 		// 先显示一个空格
+ 			10 /MOD		// 用16除 结果为 （ -- 余数 商）
+			 H. H. ;		// 依次显示高四位和低四位
+
+		: .INT  							// ( n -- )	显示一个16位整数数据
+			10 U/MOD 10 U/MOD 10 U/MOD 10 U/MOD DROP 		// 得到四个四位16进制
+			H. H. H. H. ;						// 依次显示
+
+		: .CHAR							// ( n -- )	显示一个字符
+			00FF AND 						// 字节 ASC II 的字符
+			DUP 20 < OVER 7F > OR if DROP 2E endif 		
+// 只显示ASC II 的字符码 如果是控制字符，显示为“.”，避免破坏显示列表
+
+			EMIT ;
+
+		: .16BYTES							//	( segment offset --- ) 显示一整行16个字节
+			CRLF LDUP SWAP .INT 3A EMIT .INT 1 SPACES 	//  显示开始地址
+			LDUP 0F 0 1 for  P_COUNT   .BYTE endfor  LDROP  //  显示16进制数值内容
+			4 SPACES 0F 0 1 for  P_COUNT .CHAR endfor  LDROP	// 显示16个字符
+			;
+
+		: P_DUMP    								//	( segment offset length --- )
+			DUP 0 <= if CRLF ," 长度错误!" .S ABORT endif			// 长度错误
+			DUP F000 AND 0 != if CRLF ," Too long!" .S ABORT endif		// 长度太长
+
+			>S DUP FFF0 AND 10 + SWAP DUP 000F AND				
+//	( 段 整数偏移 原始偏移 起始空格数  -- )
+
+			S> OVER 10 SWAP - - >S 
+			3 PICK -ROT							
+//	( 段 整数偏移 段 原始偏移 起始空格数  -- )
+
+			CRLF ," seg. off. " .S  0F 0 1 for I .BYTE endfor		//	显示栏名
+			      4 SPACES 0F 0 1 for I H.    endfor
+
+			CRLF 2 PICK .INT 3A EMIT 1 PICK FFF0 AND .INT 1 SPACES 		// 显示开始地址
+			2 PICK 2 PICK 2 PICK DUP 3 * SPACES 				//      跳过开始的空数据
+			10 SWAP - 1 1 for P_COUNT .BYTE endfor LDROP			//      显示头一行其余数据
+			4 SPACES DUP SPACES 
+			10 SWAP - 1 1 for P_COUNT .CHAR endfor LDROP			//      头一行其余字符
+
+			S> 10 U/MOD SWAP >S						//	( seg offset lines -- ) 中间的部分
+			DUP 0 >   
+				if	1 1 for LDUP .16BYTES 10 + endfor 		//	显示中间行
+				else 	DROP 
+				endif
+
+			S> DUP 0 >  	if						//	是否有最后一行
+					CRLF 2 PICK .INT 3A EMIT 1 PICK .INT 1 SPACES	// 有最后一行
+					2 PICK 2 PICK 2 PICK 				//	复制参数
+					1 1 for P_COUNT .BYTE endfor LDROP		//      最后一行数据数据
+					10 OVER - 3 * SPACES 4 SPACES                 
+					1 1 for P_COUNT .CHAR endfor LDROP		//      最后一行字符
+				else 	
+					DROP LDROP 					//	无最后一行
+				endif
+			CRLF ;
+
