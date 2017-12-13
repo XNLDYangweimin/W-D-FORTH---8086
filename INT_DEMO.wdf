@@ -1,0 +1,189 @@
+// ------------------------------------
+//
+// 		INT_DEMO.WDF       
+//		中断 示例程序
+// 		Written  by Yang Weimin 2013-08-31
+// 		Modified by Yang Weimin 2017-12-12
+//
+// -------------------------------------
+
+// ==== 根字典定义 =========================
+	HEX 	ROOT_ONLY  
+	
+	TEXT_COMP_OFF			// 关闭文本比较模式，大小写有区别
+
+// ==== 测试加载 X86 汇编语言 =========================
+: ?TF_include if TF_include else BL WORD DROP endif ;
+
+// ---- 如果汇编语言还没有导入， 则加载 X86 汇编语言 -----------
+FIND CODE 0= ?TF_include ASMX86V2.wdf			
+
+// ==== 后台任务 数字显示 =========================
+	HEX 	ROOT_ONLY  
+
+// ---- 计数变量 -------------------
+	VARIABLE TickX		
+
+// ---- 显示数据 -------------------
+		: D1X
+			0D EMIT TickX D_@ . ;	
+
+		: D_Disp
+			CRLF repeat 
+			0D EMIT TickX D_@ . 		// 显示数据
+			?KEY until ;
+
+// ==== 中断 前台任务 =========================
+// ---- 老中断8 钩子  -------------------
+	VARIABLE Int8_Hook		
+	
+// ---- 前台任务 -------------------
+		CODE 	TickX++    			//	计数变量加一
+
+// ---- 自己的中断处理程序 --------------------
+//			CLI				//  要保护 临界区
+			PUSHF				// 保存状态寄存器
+
+			DS PUSH			// 保存要使用的寄存器
+			AX PUSH			// 保存要使用的寄存器
+			BX PUSH			// 保存要使用的寄存器
+			CX PUSH			// 保存要使用的寄存器
+
+        		BX, # 0122 MOV		// 数据段的段寄存器偏移变量，
+			CS: AX, [BX] MOV		// 从代码段取出数据段的偏移量->AX
+        		CX, CS MOV 			// 代码段基址
+			AX, CX ADD 			// 代码段基址+数据段的偏移量 = DS-AX
+			DS, AX MOV			// 设置数据段，这样才能进行数据处理
+//			STI				//  解除保护			
+
+// ---- 任务处理 ------------------------
+			BX, # TickX MOV 		// 	变量的地址 送BX
+  		 	[BX] INC 			//	将变量的数加1
+
+// ---- 任务处理 ------------------------
+//			CLI				//  要保护 临界区
+			CX POP				// 取回保存的寄存器
+			BX POP				// 取回保存的寄存器
+			AX POP				// 取回保存的寄存器
+			DS POP				// 取回保存的寄存器
+
+			POPF				// 取回保存的状态寄存器
+//			STI				//  解除保护
+
+// ---- 自己的中断处理程序 --------------------
+			
+// ---- 执行原来的中断处理程序 --------------------
+//			EA CODE_C,			// 指令 JMP FAR 段间直接转移指令
+//			CODE_PC@ Int8_Hook D_!	// 保存跳转指令中的地址的位置
+//			0 CODE_,			// INT 8 原来的偏移 	临时放 0
+//			0 CODE_,			// INT 8 原来的段	临时放 0
+
+			CODE_PC@ 1+ Int8_Hook D_!	// 保存跳转指令中的地址的位置
+			0	// INT 8 原来的段		临时放 0
+			0 	// INT 8 原来的偏移			临时放 0
+			JMPF
+
+		END-CODE				// 完成一个机器码的低级字
+
+// ---- 时钟中断 8 矢量  -------------------
+	VARIABLE New_Int8_Off		// 新中断8的偏移
+	VARIABLE New_Int8_Seg		// 新中断8的段
+
+// ---- 前台中断矢量 --------------------------------
+	FIND TickX++ 		// 得到字典场地址 		VFA
+	2 + V_@ 		// 得到虚拟字场地址 		WFA	Word Field Address
+	V_@ 			// 得到代码场地址 		CFA	Code Field Address
+				New_Int8_Off D_!	// 保存
+	CS_Seg 		New_Int8_Seg D_!	// 保存
+
+// ---- 操作系统 临界区保护  -------------------
+		CODE 	Int_Off    		//	关中断			
+			FA CODE_C,		//  关中断的机器码指令 = CLI			
+			NEXT, END-CODE	//	执行下一条虚拟指令
+
+		CODE 	Int_On    		// 开中断	
+			STI			// 开中断的机器码指令 = FB CS_,
+			NEXT, END-CODE	//	执行下一条虚拟指令
+
+	ROOT_ONLY  			// 注意! 当CODE 定义完成后,要恢复到FORTH根目录
+
+// ---- 老中断8矢量 --------------------------------
+	VARIABLE Old_Int8_Off		// 老中断8的偏移
+	VARIABLE Old_Int8_Seg		// 老中断8的段
+
+	0 Old_Int8_Off D_!
+	0 Old_Int8_Seg D_!
+
+// ==== 前台 任务切换 =========================
+	HEX ROOT_ONLY  
+
+// ---- 打开前台任务 --------------------------------
+		: Task_On 			
+			CS_Seg 	New_Int8_Seg D_!	// 保存当前代码段
+			0 20 P_@ 	Old_Int8_Off D_!	// 获取当前INT8的中断矢量
+			0 22 P_@ 	Old_Int8_Seg D_!
+			Old_Int8_Off D_@ 
+			CS_Seg Int8_Hook D_@    P_! 	// 钩子的偏移地址
+			Old_Int8_Seg D_@ 
+			CS_Seg Int8_Hook D_@ 2 + P_! 	// 钩子的偏移地址
+
+			Int_Off				// 进入临界区
+			New_Int8_Off D_@ 0 20 P_! 
+			New_Int8_Seg D_@ 0 22 P_! 
+			Int_On 				// 退出临界区
+			;
+	
+
+// ---- 关闭前台任务 --------------------------------
+		: Task_Off
+			Old_Int8_Off D_@ 	Old_Int8_Seg D_@
+			OR 0 != if
+				Int_Off
+				Old_Int8_Off D_@ 0 20 P_! 
+				Old_Int8_Seg D_@ 0 22 P_! 
+				Int_On 
+			endif 
+			;
+
+// ==== 后台任务 符号旋转 =========================
+	: X_WAIT  0 1 for I I * DROP endfor ;
+
+	: X_Disp 			// 显示一次字符
+		TickX D_@		// 当前计数
+		4 /
+		1 /  3 AND		//  隔一定间隔，4 种可能性
+		DUP 0 == if 2D EMIT endif 		// 显示 -
+		DUP 1 == if 2F EMIT endif		// 显示 /
+		DUP 2 == if 7C EMIT endif		// 显示 |
+		DUP 3 == if 5C EMIT endif		// 显示 \
+		DROP 
+		08 EMIT
+	; 	
+
+	: X_ROT
+		repeat X_Disp 10 X_WAIT ?KEY until  ;
+
+// ==== 综合 示例 FORTH 字 =========================
+	: D_Demo  
+		Task_On
+		D_Disp
+		Task_Off
+	;
+
+	: X_Demo  
+		Task_On
+		X_ROT
+		Task_Off
+	;
+
+// ==== 生成新的可执行程序 =========================
+// ---- End INT DEMO -----------------------------
+	DECIMAL 	ROOT_ONLY  
+
+// ---- 导出字列表 --------------------------------
+HEX				
+WORDS-L>LIST 	INT_DEMO.LST
+
+// ---- 生成新程序 --------------------------------
+SAVE-ME	INT_DEMO.COM
+
