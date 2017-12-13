@@ -1,0 +1,600 @@
+// ------------------------------------
+//
+// 		16位 8086 Assembler            
+//		参考 PC FORTH 2.0 和 F83
+//
+// 		Written  by Yang Weimin 2010-01-31
+// 		Modified by Yang Weimin 2017-12-12
+//
+// -------------------------------------
+
+// ---- 汇编语言 词汇 ---------------------------------
+	HEX  
+		ASM DEFINITIONS
+
+// ==== 交叉编译机器码存取接口 =======================================
+		: CODE_PC@				//	( -- addr )		当前程序计数器
+			SS_Seg CODE_PC P_@		;	// 本地
+
+		: CODE_C@				//	(  addr -- byte )	读程序数据
+			CS_Seg SWAP P_C@		;	// 本地	
+	
+		: CODE_C!				//	( byte addr -- )	写程序数据
+			CS_Seg SWAP P_C!		;	// 本地	
+
+		: CODE_C,				//	( byte  -- )		写程序数据
+			CS_Seg CODE_PC@  P_C!			// 本地
+			CODE_PC@ 1+ 				// 本地
+			SS_Seg CODE_PC   P_!		;	// 本地
+
+		: CODE_!				//	( word addr -- )	写程序数据
+			CS_Seg SWAP P_!		;		// 本地
+
+		: CODE_,				//	( word  -- )		写程序数据
+			CS_Seg CODE_PC@  P_!			// 本地
+			CODE_PC@ 2+ 				// 本地
+			SS_Seg CODE_PC   P_!		;	// 本地
+
+// ==== 堆栈检查 =====================================================
+		VARIABLE <AP>   0 <AP> 	D_!			//	存当前运算栈顶 
+
+		: !<AP>   	AP@ <AP> D_! ;			//	存当前运算栈顶
+		: ?<AP>        <AP> D_@ AP@ - 2- 2/ ;		//	检查堆栈中是否有偏移地址
+
+// ==== 错误信息输出 =====================================================
+	HEX
+		: ?ASM_ERROR 					//	( Flag err# -- )
+			SWAP if
+				begin CRLF   HEX
+			      	DUP 01 == if ," empty stack!"
+                    			.S  .IP exit endif
+			      	DUP 11 == if ," 16 bit register not allowed!"
+                    			.S  .IP exit endif
+			      	DUP 12 == if ," 8 bit register not allowed!"
+                    			.S  .IP exit endif
+			      	DUP 13 == if ," address out of range!"
+                    			.S  .IP exit endif
+			      	DUP 14 == if ," immediate data value not allowed!"
+                    			.S  .IP exit endif
+			      	DUP 15 == if ," missing source register!"
+                    			.S  .IP exit endif
+			      	DUP 16 == if ," missing destination register!"
+                    			.S  .IP exit endif
+			      	DUP 17 == if ," illegal operation!"
+                    			.S  .IP exit endif
+			      	DUP 18 == if ," illegal operand!"
+                    			.S  .IP exit endif
+			      	DUP 19 == if ," instruction not implemented!"
+                    			.S  .IP exit endif
+			      	DUP 1A == if ," illegal destination register!"
+                    			.S  .IP exit endif
+			      	DUP 1B == if ," illegal source register!"
+                    			.S  .IP exit endif
+        			DUP 1C == if ," illegal condition!"
+                    			.S  .IP exit endif
+        			DUP 1D == if ," register mismatch!"
+                    			.S  .IP exit endif
+        			DUP 1E == if ," destination address missing!"
+                    			.S  .IP exit endif
+        			DUP 1F == if ," unresolved forward reference!"
+                    			.S  .IP exit endif
+ 
+			        ," ASM error # "
+			        .S  HEX U. .IP 0
+			        end
+ 
+ 			       	DROP 20 EMIT DS_Seg PAD  P_COUNT P_TYPE
+			        CRLF ABORT 
+			else	DROP
+			endif
+		;
+
+// ==== 局部标号 =====================================================
+	HEX
+		0A CONSTANT LBL_MAX#       	//	标号数目
+		VARIABLE LBL_TABLE      
+		LBL_MAX# 18 * DALLOT
+
+// ---- 局部标号数据结构 ---------------------
+		: LBL_BASE 			//  ( LBL# -- data addr ) 标号数据地址
+			18 * LBL_TABLE + 		;
+		: LBL_FOREWARD 			//  ( LBL# -- data addr ) 前向引用数据地址
+			LBL_BASE  0 + 		;
+		: LBL_BACKINDEX 			//  ( LBL# -- data addr ) 后向引用数据地址
+			LBL_BASE  2 + 		;
+
+		: @LTABLE       			//   	( LBL#  --- addr ) 使用标号
+		        DUP LBL_FOREWARD D_@ 0 != 
+				if LBL_FOREWARD  D_@ 	//   	向前引用
+				else			//	向后引用
+				LBL_BACKINDEX DUP D_@ 2* 2+ OVER + CODE_PC@ SWAP D_!   	// 未反解的指令地址
+				DUP D_@ 1+ SWAP D_!					// 增加索引
+				CODE_PC@		// 临时地址
+				endif
+			;
+
+
+		: !LTABLE       			//   	( LBL#  --- addr ) 定义标号
+		        DUP LBL_FOREWARD CODE_PC@ SWAP D_! 
+			LBL_BACKINDEX DUP D_@ 0 <=
+				if DROP
+				else			// 未计算的指令地址
+				DUP D_@ 1- 0 1 	
+					for
+ 					I 2* 2+ OVER + D_@ 	// 指令地址
+
+					DUP CODE_C@ DUP E8 == SWAP E9 == OR
+						if				// 16 bits offset
+						CODE_PC@ OVER - 3 -		// 地址偏移
+						SWAP 1+ CODE_!			// 反解偏移
+
+						else				//  8 bits offset
+						CODE_PC@ OVER - 2 -		// 地址偏移
+						DUP ABS 7F > 13 ?ASM_ERROR
+						SWAP 1+ CODE_C!			// 反解偏移
+						endif
+
+					endfor
+				0 SWAP D_!			// 清除向后引用
+				endif
+			;		
+
+// ---- 局部标号操作字 ---------------------------------
+		: LBL_CLR         		//	清标号
+		        DS_Seg LBL_TABLE LBL_MAX# 18 * P_ERASE	;
+
+		: LBL_CHK         		//	检查标号
+			LBL_MAX# 1- 0 1 for
+			I LBL_BACKINDEX D_@ 0>  1F ?ASM_ERROR
+			endfor ;
+  
+// ----       local label definitions       local label references 
+ 
+		: 0$:   0 !LTABLE ;             : 0$    0 @LTABLE ;
+		: 1$:   1 !LTABLE ;             : 1$    1 @LTABLE ;
+		: 2$:   2 !LTABLE ;             : 2$    2 @LTABLE ;
+		: 3$:   3 !LTABLE ;             : 3$    3 @LTABLE ;
+		: 4$:   4 !LTABLE ;             : 4$    4 @LTABLE ;
+		: 5$:   5 !LTABLE ;             : 5$    5 @LTABLE ;
+		: 6$:   6 !LTABLE ;             : 6$    6 @LTABLE ;
+		: 7$:   7 !LTABLE ;             : 7$    7 @LTABLE ;
+		: 8$:   8 !LTABLE ;             : 8$    8 @LTABLE ;
+		: 9$:   9 !LTABLE ;             : 9$    9 @LTABLE ;
+
+// ==== 寻址模式 =====================================================
+		0 CONSTANT      DIRECT
+		1 CONSTANT      IMMED
+		2 CONSTANT      REG8
+		3 CONSTANT      REG16
+		4 CONSTANT      INDEXED
+		5 CONSTANT      SEGREG
+
+// ---- 模式变量 ---------------------------------
+		VARIABLE <RD>   0 <RD> 	D_!
+		VARIABLE <RS>   0 <RS> 	D_!
+
+		VARIABLE <TD>   0 <TD> 	D_!
+		VARIABLE <TS>   0 <TS> 	D_!
+		VARIABLE <W>    0 <W> 	D_!
+
+		VARIABLE <#>    0 <#> 	D_!
+		VARIABLE <WD>   0 <WD> 	D_!
+		VARIABLE <OD>   0 <OD> 	D_!
+		VARIABLE <OS>   0 <OS> 	D_!
+		VARIABLE <D>    0 <D> 	D_!
+
+// ---- 模式变量操作字 ---------------------------------
+	HEX
+		: ?RD     <RD> D_@ 	;	// 目的寄存器
+		: ?RS     <RS> D_@ 	;       // 源寄存器       
+		: +RD     <RD> D_@ + 	;	
+		: +RS     <RS> D_@ + 	;            
+
+               	: ?TD     <TD> D_@ 	;	// 目的地址类型
+		: ?TS     <TS> D_@ 	;       // 源地址类型       
+
+		: ?W      <W> D_@ 	;	// 是否是16位字
+		: +W      <W> D_@ + 	;             
+		: W/B,     ?W if CODE_, else CODE_C, endif 	;
+
+		: ?OD     <OD> D_@ 	;
+		: ?OS     <OS> D_@ 	;              
+		: +D      <D> D_@ 2* + 	;
+		: MOD1    3F AND 040 OR ;
+		: MOD2    3F AND 080 OR ;       
+		: MOD3    3F AND 0C0 OR ;
+
+		: RESET   0 <#>  D_!  1 <W>  D_!  0 <OS> D_!  0 <RD> D_!  0 <TD> D_!
+		          0 <TS> D_!  0 <OD> D_!  0 <D>  D_!  1 <WD> D_!  0 <RS> D_! !<AP> ;
+
+		: DSET    ?TS INDEXED == ABS <D> D_! ;
+		: DT      1 <D> D_! ;
+		: ?RD8*+RS    ?RD 8 * +RS ;
+		: ?RS8*+RD    ?RS 8 * +RD ;
+ 
+		: OFFSET8,   CODE_PC@ 	1+ - DUP ABS 	07F > 13 ?ASM_ERROR CODE_C, ;
+		: OFFSET16,  CODE_PC@ 2+ - CODE_, ;
+		: DISP,         <D> D_@ if ?OS else ?OD endif DUP 
+	                if DUP ABS 07F >
+                  		if SWAP MOD2 CODE_C, CODE_,
+	                  	else SWAP  MOD1  CODE_C, CODE_C, endif
+                	else DROP DUP 7 AND 6 ==
+  	                if MOD1 CODE_, 0 CODE_C, else  CODE_C, endif
+        	        endif ;
+
+		: BYTE          0 <W> D_! 0 <WD> D_! ;
+		: WORD          1 DUP <W> D_! <WD> D_! ;
+		: #             1 DUP <#> D_! <TS> D_! ;
+		: ,             DEPTH 1 < 1E ?ASM_ERROR 0 <TD> D_! ;
+
+// ==== 寄存器定义 =====================================================
+	HEX
+		: DREG  CREATE V_C, V_C, V_C,			//	目的寄存器
+		        DOES> DUP V_C@ DUP 0FF ==
+			        if DROP else ABS DUP <W> D_! <WD> D_! endif
+        		1+ DUP V_C@ <TD> D_! 1+ V_C@ <RD> D_!
+	       		<#> D_@ 14 ?ASM_ERROR 
+			<TD> D_@ 4 ==
+			        if ?<AP> 0> if <OD> D_! endif endif ;
+ 
+		: SREG  CREATE V_C, V_C, V_C,
+		        DOES> DUP V_C@ DUP 0FF ==
+        			if DROP else ABS <W> D_! endif
+			1+ DUP V_C@ <TS> D_! 1+ V_C@ <RS> D_!
+        		<TS> D_@ 4 ==
+        			if ?<AP> 0> if <OS> D_! endif endif ;
+ 
+		0 2 0 SREG AL   0 2 0 DREG AL,  0 3 1 SREG AX   0 3 1 DREG AX,
+		1 2 0 SREG CL   1 2 0 DREG CL,  1 3 1 SREG CX   1 3 1 DREG CX,
+		2 2 0 SREG DL   2 2 0 DREG DL,  2 3 1 SREG DX   2 3 1 DREG DX,
+		3 2 0 SREG BL   3 2 0 DREG BL,  3 3 1 SREG BX   3 3 1 DREG BX,
+		4 2 0 SREG AH   4 2 0 DREG AH,  4 3 1 SREG SP   4 3 1 DREG SP,
+		5 2 0 SREG CH   5 2 0 DREG CH,  5 3 1 SREG BP   5 3 1 DREG BP,
+		6 2 0 SREG DH   6 2 0 DREG DH,  6 3 1 SREG SI   6 3 1 DREG SI,
+		7 2 0 SREG BH   7 2 0 DREG BH,  7 3 1 SREG DI   7 3 1 DREG DI,
+
+		0 5 -1 SREG ES   0 5 -1 DREG ES,
+		1 5 -1 SREG CS   1 5 -1 DREG CS,
+		2 5 -1 SREG SS   2 5 -1 DREG SS,
+		3 5 -1 SREG DS   3 5 -1 DREG DS,
+ 
+		0 4 -1 SREG [BX+SI]             0 4 -1 DREG [BX+SI],
+		1 4 -1 SREG [BX+DI]             1 4 -1 DREG [BX+DI],
+		2 4 -1 SREG [BP+SI]             2 4 -1 DREG [BP+SI],
+		3 4 -1 SREG [BP+DI]             3 4 -1 DREG [BP+DI],
+		4 4 -1 SREG [SI]                4 4 -1 DREG [SI],
+		5 4 -1 SREG [DI]                5 4 -1 DREG [DI],
+		6 4 -1 SREG [BP]                6 4 -1 DREG [BP],
+		7 4 -1 SREG [BX]                7 4 -1 DREG [BX],
+
+// ==== 指令类型 =====================================================
+// ---- 单字节指令 ------------------------------------------- 
+		: 1MI 	CREATE  V_C,      DOES> V_C@ 	CODE_C, RESET ;
+		: 2MI   CREATE  V_C,      DOES> V_C@ 	CODE_C, OFFSET8, RESET ;
+		: 3MI   CREATE  V_C,      DOES> V_C@ +W 	CODE_C, RESET ;
+ 
+// ---- 寄存器指令 ------------------------------------------- 
+		: 4MI 	CREATE  V_C, V_C,
+                	DOES> 	?TS begin
+                  		DUP REG16  == if DROP  1+ V_C@ +RS CODE_C, exit endif	// 通用寄存器 
+                  		DUP SEGREG == if DROP   V_C@ ?RS 8 * + CODE_C, exit endif	// 段寄存器
+                		DROP -1 18 ?ASM_ERROR 
+				end RESET ;
+ 
+// ---- 寄存器指令 ------------------------------------------- 
+		: 5MI	CREATE  V_C, V_C,
+                	DOES> 	?TS begin
+             			DUP DIRECT  == if DROP  1+ V_C@ CODE_C, OFFSET16, exit endif
+             			DUP REG16   == if DROP  0FF CODE_C, V_C@ MOD3 +RS CODE_C, exit endif
+             			DUP INDEXED == if DROP  DSET 0FF CODE_C, V_C@ +RS DISP, exit endif
+                		DROP -1 18 ?ASM_ERROR 
+				end RESET ;
+
+// ---- I/O 指令 ------------------------------------------- 
+		: 6MI   CREATE  V_C, V_C,
+		        DOES> 	DUP V_C@ 2 AND if ?TD ?TS else ?TS ?TD endif
+        			REG16 == ABS <W> D_! 
+				REG16 ==
+   					if   1+ V_C@ +W CODE_C, 
+					else 	V_C@ +W CODE_C, CODE_C,		// 固定端口
+					endif  RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 7MI   CREATE  V_C, V_C, V_C,
+        		DOES> 	 ?TS IMMED  ==
+        			if  1+ DUP 1+ V_C@ +W CODE_C, ?TD begin
+          				DUP REG8    == if DROP  V_C@ MOD3 +RD CODE_C, CODE_C, exit endif 
+          				DUP REG16   == if DROP  V_C@ MOD3 +RD CODE_C, CODE_, exit endif 
+          				DUP INDEXED == if DROP  DSET V_C@ +RD DISP, 
+							   ?W if CODE_, else CODE_C, endif exit endif
+                			DROP -1 18 ?ASM_ERROR end
+
+        			else DSET V_C@ +D +W  CODE_C, ?TD begin
+        				DUP REG8    == if DROP ?TS begin
+             							DUP REG8    == if DROP  ?RS 8 * +RD MOD3 CODE_C, exit endif 
+             							DUP INDEXED == if DROP  ?RD 8 * +RS DISP, exit endif
+                						DROP -1 18 ?ASM_ERROR end
+             						exit endif
+        				DUP REG16   == if DROP ?TS   begin
+             							DUP REG16   == if DROP  ?RS 8 * +RD MOD3 CODE_C, exit endif 
+             							DUP INDEXED == if DROP  ?RD 8 * +RS DISP, exit endif
+                						DROP -1 18 ?ASM_ERROR end
+             						exit endif
+        				DUP INDEXED == if DROP ?TS   begin
+             							DUP REG8    == if DROP  ?RS 8 * +RD DISP, exit endif
+             							DUP REG16   == if DROP  ?RS 8 * +RD DISP, exit endif
+                						DROP -1 18 ?ASM_ERROR end
+             						exit endif
+                			DROP -1 18 ?ASM_ERROR end
+             			endif   RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 8MI   CREATE  V_C, V_C,
+        		DOES> 	DUP 1+ V_C@ +W CODE_C, ?TS begin
+          			DUP REG8    == if DROP  V_C@ +RS MOD3 CODE_C, exit endif
+          			DUP REG16   == if DROP  V_C@ +RS MOD3 CODE_C, exit endif
+          			DUP INDEXED == if DROP  DSET V_C@ +RS DISP, exit endif
+                		DROP -1 18 ?ASM_ERROR end
+        			RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 9MI   CREATE  V_C, V_C,
+    			DOES> 	DUP 1+ V_C@ <WD> D_@ + ?TS 1 > if 2+ endif CODE_C, ?TD begin
+        			DUP REG8     == if DROP  V_C@ MOD3 +RD CODE_C, exit endif
+        			DUP REG16    == if DROP  V_C@ MOD3 +RD CODE_C, exit endif
+        			DUP INDEXED  == if DROP  DSET V_C@ +RD DISP, exit endif
+                		DROP -1 18 ?ASM_ERROR end
+        			?TS 2 < if DROP endif RESET ;
+
+// ---- 双字节指令 ------------------------------------------- 
+		: 10MI  CREATE  V_C, V_C,
+        		DOES> DUP V_C@ SWAP 1+ V_C@ CODE_C, CODE_C, RESET ; 
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 11MI  CREATE  V_C, V_C,
+        		DOES> 	?TS begin
+          			DUP DIRECT  == if DROP  DEPTH 1 < 01 ?ASM_ERROR   0FE +W CODE_C,
+                      				   1+ V_C@ 6 + CODE_C, CODE_,  exit endif
+          			DUP REG8    == if DROP  0FE CODE_C, 1+ V_C@ MOD3 +RS CODE_C, exit endif
+          			DUP REG16   == if DROP  V_C@ +RS CODE_C, exit endif
+          			DUP INDEXED == if DROP  DSET 0FE +W CODE_C, 1+ V_C@ +RS DISP, exit endif
+                		DROP -1 18 ?ASM_ERROR end
+        			RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 12MI  CREATE  
+			DOES>  	DROP DSET ?TD begin
+        			DUP DIRECT   == if DROP ?TS begin
+       						DUP REG8   == 	if DROP  ?RS if 088 CODE_C, ?RS 8 * 6 + CODE_C, CODE_,
+                        						else 0A2 +W CODE_C, CODE_,
+									endif 
+								exit endif 
+       						DUP REG16  ==   if DROP  ?RS if 089 CODE_C, ?RS 8 * 6 + CODE_C, CODE_,
+                        						else 0A2 +W CODE_C, CODE_, 
+									endif 
+								exit endif 
+      						DUP SEGREG ==   if DROP  08C CODE_C, ?RS 8 * 6 + CODE_C, CODE_, 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+        			DUP REG8     == if DROP ?TS begin
+     						DUP DIRECT ==   if DROP  ?RD if 08A CODE_C, ?RD 8 * 6 + CODE_C, CODE_,
+                        						else 0A0 +W CODE_C, CODE_, 
+									endif 
+								exit endif 
+          					DUP IMMED    == if DROP  0B0 +RD CODE_C, CODE_C, 
+								exit endif 
+    						DUP REG8     == if DROP  DT 088 +D CODE_C, ?RD 8 * +RS MOD3 CODE_C, 
+								exit endif 
+          					DUP REG16    == if DROP -1  1D ?ASM_ERROR 
+								exit endif 
+          					DUP INDEXED  == if DROP  88 +D +W CODE_C, ?RD 8 * +RS DISP, 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+        			DUP REG16    == if DROP ?TS begin
+   						DUP DIRECT   == if DROP  ?RD if 08B CODE_C, ?RD 8 * 6 + CODE_C, CODE_,
+                    							else 0A0 +W CODE_C, CODE_, 
+									endif 
+								exit endif 
+          					DUP IMMED    == if DROP  0B8 +RD CODE_C, CODE_, 
+								exit endif 
+ 						DUP REG16    == if DROP  DT 088 +W +D CODE_C, ?RD 8 * +RS MOD3 CODE_C, 
+								exit endif 
+    						DUP INDEXED  == if DROP  088 +D +W CODE_C, ?RD 8 * +RS DISP, 
+								exit endif 
+      						DUP SEGREG   == if DROP  08C CODE_C, ?RS 8 * +RD MOD3 CODE_C, 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+        			DUP INDEXED  == if DROP ?TS begin 
+      						DUP IMMED    == if DROP  0C6 +W CODE_C, ?RD DISP, ?W if CODE_, else CODE_C, endif 
+								exit endif 
+      						DUP REG8     == if DROP  088 +D +W CODE_C, ?RS 8 * +RD DISP, 
+								exit endif 
+      						DUP REG16    == if DROP  088 +D +W  CODE_C, ?RS 8 * +RD DISP, 
+								exit endif 
+          					DUP SEGREG   == if DROP  08C CODE_C, ?RS 8 * +RD DISP, 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+     				DUP SEGREG   == if DROP ?TS begin
+     						DUP DIRECT   == if DROP  08E CODE_C, ?RD 8 * 6 + CODE_C, CODE_, 
+								exit endif 
+     						DUP REG16    == if DROP  08E CODE_C, ?RD 8 * +RS MOD3 CODE_C, 
+								exit endif 
+     						DUP INDEXED  == if DROP  08E CODE_C, ?RD 8 * +RS DISP, 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+          			DROP -1 18 ?ASM_ERROR end
+        			RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 13MI  CREATE
+			DOES> 	DROP DSET ?TD begin
+        			DUP DIRECT   == if DROP ?TS REG16 == if 90 +RS CODE_C,
+							 	else -1 18 ?ASM_ERROR 
+								endif 
+						exit endif 
+        			DUP REG8     == if DROP 86 +W CODE_C, ?TS begin
+          					DUP REG8     == if DROP  ?RD 8 * +RS MOD3 CODE_C, 
+								exit endif 
+          					DUP INDEXED  == if DROP  ?RD 8 * +RS DISP, 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+        			DUP REG16    == if DROP 86 +W CODE_C, ?TS begin
+          					DUP REG16    == if DROP  ?RD 8 * +RS MOD3 CODE_C, 
+								exit endif 
+          					DUP INDEXED  == if DROP  ?RD 8 * +RS DISP, 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+          			DROP -1 18 ?ASM_ERROR end
+        			RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 14MI  CREATE  
+			DOES> 	DROP ?TS begin
+        			DUP DIRECT   == if DROP -1 18 ?ASM_ERROR 
+						exit endif 
+        			DUP IMMED    == if DROP 0F6 +W CODE_C, ?TD begin
+ 						DUP REG8     == if DROP ?RD MOD3 CODE_C, ?W if CODE_, else CODE_C, endif
+								exit endif 
+ 						DUP REG16    == if DROP ?RD MOD3 CODE_C, ?W if CODE_, else CODE_C, endif 
+								exit endif 
+   						DUP INDEXED  == if DROP ?RD DISP, ?W if CODE_, else CODE_C, endif 
+								exit endif 
+                				DROP -1 18 ?ASM_ERROR end
+						exit endif 
+        			DUP SEGREG   == if DROP -1 18 ?ASM_ERROR
+						exit endif 
+     				DROP ?TD REG8 < ?TD REG16 > OR 18 ?ASM_ERROR 
+				84 +W CODE_C, ?RD 8 *  +RS ?TS INDEXED < if MOD3 CODE_C, else DISP, endif 
+				end  RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 15MI  CREATE  
+			DOES> DROP 0CD CODE_C, CODE_C, RESET ;
+		: 16MI  CREATE  
+			DOES> DROP ?RS 8 * 26 + CODE_C, RESET ;
+
+// ---- 寄存器指令 ------------------------------------------- 
+		: 17MI  CREATE  V_C, V_C,
+        		DOES>  ?TS begin
+        			DUP DIRECT   ==	if DROP   1+ V_C@ CODE_C, CODE_, CODE_, 
+						exit endif 
+        			DUP REG16    == if DROP     0FF CODE_C, V_C@ MOD3 +RS CODE_C, 
+						exit endif 
+        			DUP INDEXED  == if DROP  DSET 0FF CODE_C, V_C@ +RS DISP, 
+						exit endif 
+                		DROP -1 18 ?ASM_ERROR end
+        		RESET ;
+
+
+// ==== 8086 指令集 =====================================================
+	HEX   
+37       1MI   AAA     80 38 38 7MI  CMP            15MI INT
+D5 0A    10MI  AAD     A6       3MI  CMPS     CE    1MI  INTO
+D4 0A    10MI  AAM     99       1MI  CWD      CF    1MI  IRET
+3F       1MI   AAS     27       1MI  DAA      77    2MI  JA
+80 10 10 7MI   ADC     2F       1MI  DAS      73    2MI  JAE
+80 00 00 7MI   ADD     08 48    11MI DEC      72    2MI  JB
+80 20 20 7MI   AND     F6 30    8MI  DIV      76    2MI  JBE
+E8 10    5MI   CALL            //    ( ESC ) 
+   E3    2MI   JCXZ
+9A 18    17MI  CALLF
+98       1MI   CBW     F4       1MI  HLT      74    2MI  JE
+F8       1MI   CLC     F6 38    8MI  IDIV     7F    2MI  JG
+FC       1MI   CLD     F6 28    8MI  IMUL     7D    2MI  JGE
+FA       1MI   CLI     EC E4    6MI  IN       7C    2MI  JL
+F5       1MI   CMC     00 40    11MI INC      7E    2MI  JLE
+
+E9 20 5MI  JMP      75       2MI  JNZ      E2       2MI  LOOP
+EA 28 17MI JMPF
+76    2MI  JNA      70       2MI  JO       E1       2MI  LOOPE
+72    2MI  JNAE     7A       2MI  JP       E0       2MI  LOOPNE
+73    2MI  JNB      7A       2MI  JPE      E0       2MI  LOOPNZ
+77    2MI  JNBE     7B       2MI  JPO      E1       2MI  LOOPZ
+75    2MI  JNE      78       2MI  JS                12MI MOV
+7E    2MI  JNG      74       2MI  JZ       A4       3MI  MOVS
+7C    2MI  JNGE     9F       1MI  LAHF     F6 20    8MI  MUL
+7D    2MI  JNL      AC       3MI  LDS      F6 18    8MI  NEG
+7F    2MI  JNLE     8A 8A 8A 7MI  LEA      90       1MI  NOP
+71    2MI  JNO              //   (  LES )    
+F6 10    8MI  NOT
+7B    2MI  JNP      F0       1MI  LOCK     80 08 08 7MI  OR
+79    2MI  JNS      AC       3MI  LODS     EE E6    6MI  OUT
+
+58 07 4MI  POP      D0 08    9MI  ROR     80 28 28 7MI  SUB
+9D    1MI  POPF     9E       1MI  SAHF             14MI TEST
+50 06 4MI  PUSH     D0 38    9MI  SAR     9B       1MI  WAIT
+9C    1MI  PUSHF    80 18 18 7MI  SBB              13MI XCHG
+D0 10 9MI  RCL      AE       3MI  SCAS    D7       1MI  XLAT
+D0 18 9MI  RCR               16MI SEG     80 30 30 7MI  XOR
+F3    1MI  REP      D0 20    9MI  SAL           72 2MI  JC
+F3    1MI  REPE     D0 20    9MI  SHL           73 2MI  JNC
+F2    1MI  REPNE    D0 28    9MI  SHR
+F2    1MI  REPNZ    F9       1MI  STC
+F3    1MI  REPZ     FD       1MI  STD
+C3    1MI  RET      FB       1MI  STI
+CB    1MI  RETF 
+D0 00 9MI  ROL      AA       3MI  STOS
+
+// ---- 段前缀 ------------------------------------------- 
+		: CS: CS SEG ;  
+		: DS: DS SEG ;  
+		: ES: ES SEG ;  
+		: SS: SS SEG ;
+
+// ==== FORTH 虚拟机 与 8086 CPU 的寄存器对照表 ==================
+		: RP 		BP ; 			// 返回栈指针
+		: [D:RP+] 	[BP] ; 
+		: RP, 		BP, ; 
+		: [D:RP+], 	[BP], ;
+
+		: AP 		DI ; 			// 算术栈指针
+		: [AP]  	[DI] ; 
+		: AP, 		DI, ; 
+		: [AP],  	[DI], ;
+
+		: IP 		SI ;			// 指令指针 
+		: [E:IP] 	[SI] ; 
+		: IP, 		SI, ; 
+		: [E:IP], 	[SI], ;
+
+		: WP 		BX ; 			// 字指针
+		: [E:WP] 	[BX] ; 
+		: WP, 		BX, ; 
+		: [E:WP], 	[BX], ;
+HEX
+		: [RP],SI-MOV   89 CODE_C, 76 CODE_C, 00 CODE_C, ;
+
+//	可以自由使用 AX、CX、DX
+//	可以使用系统堆栈 SP 暂时保存数据，但注意在每个字中保持平衡
+
+// ==== FORTH 虚拟机 虚拟机代码字定义 ==================
+		: NEXT,  
+			E9 CODE_C, (NEXT)   CODE_PC@ 2 + -  CODE_, ;
+
+		: 1PUSH, 
+			E9 CODE_C, (1PUSH)  CODE_PC@ 2 + -  CODE_, ;
+
+		: 2PUSH, 
+			E9 CODE_C, (2PUSH)  CODE_PC@ 2 + -  CODE_, ;
+
+		: NSCHECK, 
+			E8 CODE_C, (SCHECK) CODE_PC@ 2 + -  CODE_, ;
+
+// ---- FORTH 汇编语言 定义字 --------------------------------------------------------------
+	HEX 	ROOT_ONLY  ASM
+		: CODE
+        		VHERE CODE_PC@  V_,  0  <BUILD ASM
+        		LBL_CLR RESET       	;
+
+		: END-CODE  
+			RESET LBL_CHK   	;
+
+// ---- End ASM X86 ----------------------------------------------------
+	DECIMAL 	ROOT_ONLY  
